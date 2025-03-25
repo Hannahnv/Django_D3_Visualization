@@ -38,15 +38,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'sales',
-    'rest_framework',
-    'schema_viewer',
+    # 'schema_viewer',
 
 ]
-SCHEMA_VIEWER = {
-    'apps': [
-        'sales'
-    ]
-}
+# SCHEMA_VIEWER = {
+#     'apps': [
+#         'sales'
+#     ]
+# }
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -130,10 +129,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # Ensure STATIC_ROOT is set
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'sales/static'),  # Đường dẫn đến thư mục static
-]
 
 import mimetypes
 
