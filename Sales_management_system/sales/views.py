@@ -550,8 +550,308 @@ def chart_data(request, question):
         # Trả về JSON để D3 xử lý
         result = [{'total_spent': spent} for spent in spending_values]
 
+    elif question == "Q13":
+        # Q13: Số lượng khách hàng theo phân khúc
+        segment_customers = Customer.objects.values(
+            'segment__segment_code', 'segment__description'
+        ).annotate(
+            customer_count=Count('id')
+        ).order_by('-customer_count')
+        
+        # Chuyển đổi thành định dạng JSON cho biểu đồ
+        result = [
+            {
+                'segment_code': item['segment__segment_code'] or 'KXĐ',  # Xử lý trường hợp segment là NULL
+                'segment_name': item['segment__description'] or 'Không xác định',
+                'customer_count': item['customer_count']
+            }
+            for item in segment_customers
+        ]
+    elif question == "Q14":
+        # Q14: Doanh số theo phân khúc khách hàng
+        segment_revenue = OrderDetail.objects.select_related(
+            'order__customer__segment'
+        ).values(
+            'order__customer__segment__segment_code',
+            'order__customer__segment__description'
+        ).annotate(
+            total_revenue=Sum('total')
+        ).order_by('-total_revenue')
+        
+        # Chuyển đổi thành định dạng JSON cho biểu đồ
+        result = [
+            {
+                'segment_code': item['order__customer__segment__segment_code'] or 'KXĐ',
+                'segment_name': item['order__customer__segment__description'] or 'Không xác định',
+                'total_revenue': item['total_revenue'] or 0
+            }
+            for item in segment_revenue
+        ]
+    elif question == "Q15":
+        # Bước 1: Xác định tháng cao điểm (tháng có doanh số cao nhất)
+        monthly_revenue = OrderDetail.objects.annotate(
+            month=ExtractMonth('order__created_at')
+        ).values('month').annotate(
+            total_revenue=Sum('total')
+        ).order_by('-total_revenue')
+        
+        # Lấy tháng có doanh số cao nhất
+        peak_month = monthly_revenue.first()['month'] if monthly_revenue.exists() else None
+        
+        # Bước 2: Lấy doanh số theo phân khúc khách hàng trong tháng cao điểm
+        segment_revenue_peak_month = OrderDetail.objects.select_related(
+            'order__customer__segment'
+        ).annotate(
+            month=ExtractMonth('order__created_at')
+        ).filter(
+            month=peak_month
+        ).values(
+            'order__customer__segment__segment_code',
+            'order__customer__segment__description'
+        ).annotate(
+            total_revenue=Sum('total')
+        ).order_by('-total_revenue')
+        
+        # Chuyển đổi thành định dạng JSON cho biểu đồ
+        result = [
+            {
+                'segment_code': item['order__customer__segment__segment_code'] or 'KXĐ',
+                'segment_name': item['order__customer__segment__description'] or 'Không xác định',
+                'total_revenue': item['total_revenue'] or 0,
+                'peak_month': peak_month
+            }
+            for item in segment_revenue_peak_month
+        ]
+
+    elif question == "Q16":
+        # Tính giá trị trung bình đơn hàng (AOV) theo phân khúc khách hàng
+        segment_aov = Order.objects.select_related('customer__segment').values(
+            'customer__segment__segment_code',
+            'customer__segment__description'
+        ).annotate(
+            # Tổng doanh số
+            total_revenue=Sum('orderdetail__total'),
+            # Số lượng đơn hàng
+            order_count=Count('id', distinct=True)
+        ).filter(
+            order_count__gt=0  # Đảm bảo không chia cho 0
+        ).annotate(
+            # Tính AOV = Tổng doanh số / Số lượng đơn hàng
+            aov=F('total_revenue') / F('order_count')
+        ).order_by('-aov')
+        
+        # Chuyển đổi thành định dạng JSON cho biểu đồ
+        result = [
+            {
+                'segment_code': item['customer__segment__segment_code'] or 'KXĐ',
+                'segment_name': item['customer__segment__description'] or 'Không xác định',
+                'aov': int(item['aov']) if item['aov'] is not None else 0,
+                'order_count': item['order_count'],
+                'total_revenue': item['total_revenue']
+            }
+            for item in segment_aov
+        ]
+    elif question == "Q17":
+        # Q17: Doanh số và tăng trưởng theo tháng (line and stacked column chart)
+        
+        # Lấy doanh số theo tháng
+        monthly_revenue = OrderDetail.objects.annotate(
+            month=ExtractMonth('order__created_at')
+        ).values('month').annotate(
+            total_revenue=Sum('total')
+        ).order_by('month')
+        
+        # Chuyển đổi thành list để dễ xử lý
+        revenue_data = list(monthly_revenue)
+        
+        # Tính tăng trưởng giữa các tháng
+        result = []
+        previous_revenue = None
+        
+        for i, item in enumerate(revenue_data):
+            current_month = item['month']
+            current_revenue = item['total_revenue']
+            
+            # Tính tăng trưởng so với tháng trước
+            growth_rate = 0
+            if previous_revenue and previous_revenue > 0:
+                growth_rate = ((current_revenue - previous_revenue) / previous_revenue) * 100
+            
+            # Lưu doanh số tháng hiện tại cho lần lặp tiếp theo
+            previous_revenue = current_revenue
+            
+            # Thêm vào kết quả
+            result.append({
+                'month': current_month,
+                'total_revenue': current_revenue,
+                'growth_rate': round(growth_rate, 1)  # Làm tròn đến 1 chữ số thập phân
+            })
+
+    elif question == "Q18":
+        # Q18: Phân bố doanh số theo phân khúc khách hàng và nhóm hàng
+        
+        # Lấy doanh số theo từng cặp phân khúc và nhóm hàng
+        segment_category_revenue = OrderDetail.objects.select_related(
+            'order__customer__segment', 
+            'product__category'
+        ).values(
+            'order__customer__segment__segment_code',
+            'product__category__category_code',
+            'product__category__category_name'
+        ).annotate(
+            total_revenue=Sum('total')
+        )
+        
+        # Tạo cấu trúc dữ liệu giống pivot table
+        pivot_data = {}
+        all_categories = set()
+        
+        # Tổng hợp dữ liệu thô
+        for item in segment_category_revenue:
+            segment_code = item['order__customer__segment__segment_code'] or 'KXĐ'
+            category_code = item['product__category__category_code'] or 'KXĐ'
+            category_name = item['product__category__category_name'] or 'Không xác định'
+            revenue = item['total_revenue'] or 0
+            
+            if segment_code not in pivot_data:
+                pivot_data[segment_code] = {'total': 0}
+            
+            # Lưu doanh số cho nhóm hàng
+            pivot_data[segment_code][category_code] = revenue
+            
+            # Cộng vào tổng doanh số của phân khúc
+            pivot_data[segment_code]['total'] += revenue
+            
+            # Thêm nhóm hàng vào danh sách
+            all_categories.add(category_code)
+        
+        # Danh sách nhóm hàng (được sắp xếp)
+        categories = sorted(list(all_categories))
+        
+        # Tính toán tỷ lệ phần trăm
+        for segment_code, segment_data in pivot_data.items():
+            segment_total = segment_data['total']
+            if segment_total > 0:
+                for category_code in all_categories:
+                    revenue = segment_data.get(category_code, 0)
+                    # Tính phần trăm dựa trên tổng doanh số của phân khúc đó (không phải tổng toàn bộ)
+                    percentage = (revenue / segment_total) * 100
+                    segment_data[f'{category_code}_pct'] = percentage
+        
+        # Lấy tên các phân khúc khách hàng
+        segment_names = {}
+        for segment in Segment.objects.all():
+            segment_names[segment.segment_code] = segment.description or segment.segment_code
+        
+        # Lấy tên các nhóm hàng
+        category_names = {}
+        for category in Category.objects.all():
+            category_names[category.category_code] = category.category_name or category.category_code
+        
+        # Chuyển đổi thành định dạng cho biểu đồ
+        matrix = []
+        for segment_code, segment_data in pivot_data.items():
+            row = {
+                'segment_code': segment_code,
+                'segment_name': segment_names.get(segment_code, segment_code),
+                'total': segment_data['total'],
+                'categories': {}
+            }
+            
+            for category_code in categories:
+                revenue = segment_data.get(category_code, 0)
+                percentage = segment_data.get(f'{category_code}_pct', 0)
+                
+                row['categories'][category_code] = {
+                    'revenue': revenue,
+                    'percentage': round(percentage, 2)
+                }
+            
+            matrix.append(row)
+        
+        # Sắp xếp matrix theo mã phân khúc
+        matrix.sort(key=lambda x: x['segment_code'])
+        
+        # Kết quả trả về
+        result = {
+            'segments': [row['segment_code'] for row in matrix],
+            'categories': categories,
+            'segment_names': segment_names,
+            'category_names': category_names,
+            'matrix': matrix
+        }
+    elif question == "Q19":
+        # Q19: Phân phối chi tiêu theo phân khúc khách hàng (Box Plot)
+        
+        # Tạo query để tính tổng chi tiêu của mỗi khách hàng theo phân khúc
+        customer_spending = OrderDetail.objects.select_related(
+            'order__customer', 'order__customer__segment'
+        ).values(
+            'order__customer__customer_code',
+            'order__customer__segment__segment_code'
+        ).annotate(
+            total_spending=Sum('total')
+        ).order_by('order__customer__segment__segment_code')
+        
+        # Tạo dictionary để lưu trữ dữ liệu theo từng phân khúc
+        segment_spending = {}
+        
+        # Chuyển QuerySet thành dữ liệu cho biểu đồ
+        for item in customer_spending:
+            segment_code = item['order__customer__segment__segment_code'] or 'KXĐ'
+            spending = item['total_spending'] or 0
+            
+            if segment_code not in segment_spending:
+                segment_spending[segment_code] = []
+            
+            segment_spending[segment_code].append(spending)
+        
+        # Tính toán thống kê cho mỗi phân khúc
+        result = []
+        
+        for segment_code, spendings in segment_spending.items():
+            # Sắp xếp chi tiêu
+            sorted_spendings = sorted(spendings)
+            n = len(sorted_spendings)
+            
+            if n > 0:
+                # Tính các giá trị thống kê
+                min_val = sorted_spendings[0]
+                q1 = sorted_spendings[int(n * 0.25)] if n > 3 else min_val
+                median = sorted_spendings[int(n * 0.5)] if n > 1 else min_val
+                q3 = sorted_spendings[int(n * 0.75)] if n > 3 else min_val
+                max_val = sorted_spendings[-1]
+                
+                # Tính IQR và giới hạn của các outlier
+                iqr = q3 - q1
+                lower_bound = q1 - 1.5 * iqr
+                upper_bound = q3 + 1.5 * iqr
+                
+                # Xác định các điểm outlier
+                outliers = [s for s in sorted_spendings if s < lower_bound or s > upper_bound]
+                
+                # Xác định whiskers (không bao gồm outlier)
+                non_outliers = [s for s in sorted_spendings if lower_bound <= s <= upper_bound]
+                whisker_bottom = non_outliers[0] if non_outliers else min_val
+                whisker_top = non_outliers[-1] if non_outliers else max_val
+                
+                # Thêm thông tin phân khúc vào kết quả
+                result.append({
+                    'segment_code': segment_code,
+                    'min': min_val,
+                    'q1': q1,
+                    'median': median,
+                    'q3': q3,
+                    'max': max_val,
+                    'whisker_bottom': whisker_bottom,
+                    'whisker_top': whisker_top,
+                    'outliers': outliers,
+                    'raw_data': sorted_spendings  # Thêm dữ liệu thô để vẽ điểm
+                })
+        
+        # Sắp xếp kết quả theo mã phân khúc
+        result.sort(key=lambda x: x['segment_code'])
     else:
         result = []
-
     # Trả về JSON
     return JsonResponse(result, safe=False)
